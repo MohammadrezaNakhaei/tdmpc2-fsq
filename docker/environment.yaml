@@ -38,6 +38,7 @@ dependencies:
     - pandas==2.0.3
     - wandb==0.17.4
     - wheel==0.38.0
+    - vector_quantize_pytorch
     ####################
     # Gym:
     # (unmaintained but required for maniskill2/meta-world)

@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tensordict import from_modules
 from copy import deepcopy
+from vector_quantize_pytorch import FSQ as _FSQ
+
 
 class Ensemble(nn.Module):
 	"""
@@ -65,6 +67,29 @@ class PixelPreprocess(nn.Module):
 	def forward(self, x):
 		return x.div(255.).sub(0.5)
 
+
+class FSQ(nn.Module):
+    """
+    Finite Scalar Quantization
+    """
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.levels = cfg.levels
+        self.num_channels = len(cfg.levels)
+        self._fsq = _FSQ(cfg.levels)
+
+    def forward(self, z):
+        shp = z.shape
+        z = z.view(*shp[:-1], -1, self.num_channels)
+        if z.ndim > 3:  # TODO this might not work for CNN
+            codes, indices = torch.func.vmap(self._fsq)(z)
+        else:
+            codes, indices = self._fsq(z)
+        return codes.flatten(-2)
+
+    def __repr__(self):
+        return f"FSQ(levels={self.levels})"
 
 class SimNorm(nn.Module):
 	"""
@@ -149,11 +174,12 @@ def enc(cfg, out={}):
 	"""
 	Returns a dictionary of encoders for each observation in the dict.
 	"""
+	act = FSQ if cfg.use_fsq else SimNorm
 	for k in cfg.obs_shape.keys():
 		if k == 'state':
-			out[k] = mlp(cfg.obs_shape[k][0] + cfg.task_dim, max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim], cfg.latent_dim, act=SimNorm(cfg))
+			out[k] = mlp(cfg.obs_shape[k][0] + cfg.task_dim, max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim], cfg.latent_dim, act=act(cfg))
 		elif k == 'rgb':
-			out[k] = conv(cfg.obs_shape[k], cfg.num_channels, act=SimNorm(cfg))
+			out[k] = conv(cfg.obs_shape[k], cfg.num_channels, act=act(cfg))
 		else:
 			raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
 	return nn.ModuleDict(out)
